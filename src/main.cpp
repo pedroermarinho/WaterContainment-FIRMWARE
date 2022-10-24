@@ -5,6 +5,10 @@
 #include <WiFiManager.h>
 #include <PubSubClient.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <BluetoothSerial.h>
+#include <esp_wifi.h>
+#include "driver/adc.h"
 
 #define SENSOR 27
 #define LED_ALARME 2
@@ -34,6 +38,8 @@ void mqttCallback(char *topic, byte *payload, unsigned int length);
 void reconnect();
 String getJson(float value);
 void onAlarm();
+void disableWiFi();
+void enableWiFi();
 
 void setup()
 {
@@ -84,11 +90,19 @@ int cont = 0;
 void loop()
 {
     currentMillis = millis();
+
     if (currentMillis - previousMillis > interval)
     {
-        if (!mqttClient.connected())
+
+        if (mqttClient.connected())
         {
-            reconnect();
+            digitalWrite(LED_MQTT, HIGH);
+            mqttClient.publish("SENSORES", getJson(flowRate).c_str());
+            mqttClient.loop();
+        }
+        else
+        {
+            digitalWrite(LED_MQTT, LOW);
         }
 
         pulse1Sec = pulseCount;
@@ -103,11 +117,22 @@ void loop()
         Serial.print("L/min");
         Serial.print("\n"); // Print tab space
 
-        mqttClient.loop();
-
         if (int(flowRate) > 0)
         {
-            mqttClient.publish("SENSORES", getJson(flowRate).c_str());
+            if (WiFi.status() != WL_CONNECTED)
+            {
+                enableWiFi();
+                delay(1000);
+                reconnect();
+            }
+        }
+        else
+        {
+            if (WiFi.status() == WL_CONNECTED)
+            {
+                delay(1000);
+                disableWiFi();
+            }
         }
 
         Serial.println(mqttClient.state());
@@ -166,13 +191,12 @@ void reconnect()
         if (mqttClient.connect("teste", "watercontainment", "watercontainment123"))
         {
             Serial.println("connected");
-            digitalWrite(LED_MQTT, LOW);
             // Subscribe
             mqttClient.subscribe("ALARMES");
         }
         else
         {
-            digitalWrite(LED_MQTT, HIGH);
+
             Serial.print("failed, rc=");
             Serial.print(mqttClient.state());
             Serial.println(" try again in 5 seconds");
@@ -195,4 +219,40 @@ void onAlarm()
     digitalWrite(LED_ALARME, HIGH);
     delay(5000);
     digitalWrite(LED_ALARME, LOW);
+}
+
+void disableWiFi()
+{
+    adc_power_off();
+    WiFi.disconnect(true); // Disconnect from the network
+    WiFi.mode(WIFI_OFF);   // Switch WiFi off
+}
+
+void enableWiFi()
+{
+    adc_power_on();
+    WiFi.disconnect(false); // Reconnect the network
+    WiFi.mode(WIFI_STA);    // Switch WiFi off
+
+    Serial2.println("START WIFI");
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        if (!wifiManager.autoConnect("WATER-CONTAINMENT-CONFIG", "12345678")) // Função para se autoconectar na rede
+        {
+            Serial.println("Falha ao conectar"); // Se caso não conectar na rede mostra mensagem de falha
+        }
+        else
+        {
+            Serial.println("Conectado na Rede!!!");
+        }
+    }
+    else
+    {
+        Serial.println("Conectado na Rede!!!");
+    }
+
+    Serial2.println("");
+    Serial2.println("WiFi connected");
+    Serial2.println("IP address: ");
+    Serial2.println(WiFi.localIP());
 }
